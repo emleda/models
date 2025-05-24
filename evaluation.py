@@ -1,7 +1,7 @@
 import xgboost as xgb
 import numpy as np
 import pandas as pd
-from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score
+from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score, confusion_matrix
 import joblib
 import os
 import shiny_data
@@ -28,27 +28,24 @@ def test_augmented_xgboost():
 
     # Specify augmentations
     blur_sizes = [0,1,3,5,7,9,19]
-    noise_levels = [0,1,3,5,10,20,30,50]
+    noise_levels = [0,1,3,5,10,20,30]
 
-    # Init csv
+ # Init csv
     csv_file = 'xgboost_augmented_metrics.csv'
     with open(csv_file, 'w', newline='') as f:
         writer = csv.writer(f)
         writer.writerow([
             'test_set', 'blur_size', 'noise_level', 'accuracy', 'f1',
-            # per class precision, recall, f1 (for each of 4 classes)
             'precision_immune', 'precision_other', 'precision_stromal', 'precision_tumour',
             'recall_immune', 'recall_other', 'recall_stromal', 'recall_tumour',
             'f1_immune', 'f1_other', 'f1_stromal', 'f1_tumour',
-            # overall average confidence (max prob per sample)
+            'confusion_matrix',
             'confidence_overall',
-            # per class average confidence (for samples predicted as that class)
             'confidence_immune_avg', 'confidence_other_avg', 'confidence_stromal_avg', 'confidence_tumour_avg',
-            # per class std dev of confidence
             'confidence_immune_std', 'confidence_other_std', 'confidence_stromal_std', 'confidence_tumour_std',
-            # counts of predictions per class (how many samples predicted as each class)
             'count_pred_immune', 'count_pred_other', 'count_pred_stromal', 'count_pred_tumour'
         ])
+
 
     for test_num, (X_test, y_test_enc) in enumerate([(X_test1, y_test1), (X_test2, y_test2), (X_test3, y_test3)], 1):
         for noise_level in noise_levels:
@@ -68,10 +65,10 @@ def test_augmented_xgboost():
                 precision_per_class = precision_score(y_test_enc, y_pred, average=None, zero_division=0)
                 recall_per_class = recall_score(y_test_enc, y_pred, average=None, zero_division=0)
                 f1_per_class = f1_score(y_test_enc, y_pred, average=None, zero_division=0)
+                conf_matrix_str = str(confusion_matrix(y_test_enc, y_pred, labels=[0,1,2,3]).tolist())
+
                 confidence_overall = np.mean(np.max(y_pred_probs, axis=1))
-
                 counts_per_class = np.array([np.sum(y_pred == i) for i in range(y_pred_probs.shape[1])])
-
                 conf_avg_per_class = []
                 conf_std_per_class = []
                 for class_idx in range(y_pred_probs.shape[1]):
@@ -95,6 +92,7 @@ def test_augmented_xgboost():
                         *precision_per_class,
                         *recall_per_class,
                         *f1_per_class,
+                        conf_matrix_str,
                         confidence_overall,
                         *conf_avg_per_class,
                         *conf_std_per_class,
@@ -139,7 +137,7 @@ def test_augmented_resnet():
     model = models.resnet50(pretrained=False)
     num_ftrs = model.fc.in_features
     model.fc = nn.Linear(num_ftrs, 4)
-    model.load_state_dict(torch.load('resnet50.pt', map_location=device))
+    model.load_state_dict(torch.load('resnet50_models/resnet50_original_model.pt', map_location=device))
     model = model.to(device)
     model.eval()
 
@@ -158,6 +156,7 @@ def test_augmented_resnet():
             'precision_immune', 'precision_other', 'precision_stromal', 'precision_tumour',
             'recall_immune', 'recall_other', 'recall_stromal', 'recall_tumour',
             'f1_immune', 'f1_other', 'f1_stromal', 'f1_tumour',
+            'confusion',
             'confidence_overall',
             'confidence_immune_avg', 'confidence_other_avg', 'confidence_stromal_avg', 'confidence_tumour_avg',
             'confidence_immune_std', 'confidence_other_std', 'confidence_stromal_std', 'confidence_tumour_std',
@@ -185,8 +184,7 @@ def test_augmented_resnet():
                         all_preds.extend(predicted.cpu().numpy())
                         all_labels.extend(labels.cpu().numpy())
                         all_probs.extend(probs.cpu().numpy())
-
-                # Metrics
+          # Metrics
                 accuracy = accuracy_score(all_labels, all_preds)
                 f1_weighted = f1_score(all_labels, all_preds, average='weighted')
                 precision_per_class = precision_score(all_labels, all_preds, average=None, zero_division=0)
@@ -195,6 +193,8 @@ def test_augmented_resnet():
                 all_probs = np.array(all_probs)
                 all_preds = np.array(all_preds)
                 all_labels = np.array(all_labels)
+
+                confusion = str(confusion_matrix(all_labels, all_preds, labels=[0,1,2,3]).tolist())
 
                 # Confidence metrics
                 confidence_overall = np.mean(np.max(all_probs, axis=1))
@@ -223,6 +223,7 @@ def test_augmented_resnet():
                         *precision_per_class,
                         *recall_per_class,
                         *f1_per_class,
+                        confusion,
                         confidence_overall,
                         *conf_avg_per_class,
                         *conf_std_per_class,
@@ -251,6 +252,7 @@ def test_augmented_cnn():
             'precision_immune', 'precision_other', 'precision_stromal', 'precision_tumour',
             'recall_immune', 'recall_other', 'recall_stromal', 'recall_tumour',
             'f1_immune', 'f1_other', 'f1_stromal', 'f1_tumour',
+            'confusion_matrix',
             'confidence_overall',
             'confidence_immune_avg', 'confidence_other_avg', 'confidence_stromal_avg', 'confidence_tumour_avg',
             'confidence_immune_std', 'confidence_other_std', 'confidence_stromal_std', 'confidence_tumour_std',
@@ -269,14 +271,14 @@ def test_augmented_cnn():
                 y_pred_probs = model.predict(X_test_aug)
                 y_pred = np.argmax(y_pred_probs, axis=1)
 
-                # Metrics
+                
                 accuracy = accuracy_score(y_test, y_pred)
                 f1_weighted = f1_score(y_test, y_pred, average='weighted')
                 precision_per_class = precision_score(y_test, y_pred, average=None, zero_division=0)
                 recall_per_class = recall_score(y_test, y_pred, average=None, zero_division=0)
                 f1_per_class = f1_score(y_test, y_pred, average=None, zero_division=0)
+                conf_matrix_str = str(confusion_matrix(y_test, y_pred, labels=[0,1,2,3]).tolist())
 
-                # Confidence metrics
                 confidence_overall = np.mean(np.max(y_pred_probs, axis=1))
                 counts_pred_per_class = np.array([np.sum(y_pred == i) for i in range(y_pred_probs.shape[1])])
                 conf_avg_per_class = []
@@ -289,9 +291,8 @@ def test_augmented_cnn():
                         conf_std_per_class.append(np.std(confs))
                     else:
                         conf_avg_per_class.append(np.nan)
-                        conf_std_per_class.append(np.nan)  
+                        conf_std_per_class.append(np.nan)
 
-                # Write to csv
                 with open(csv_file, 'a', newline='') as f:
                     writer = csv.writer(f)
                     writer.writerow([
@@ -303,6 +304,7 @@ def test_augmented_cnn():
                         *precision_per_class,
                         *recall_per_class,
                         *f1_per_class,
+                        conf_matrix_str,
                         confidence_overall,
                         *conf_avg_per_class,
                         *conf_std_per_class,
@@ -312,5 +314,6 @@ def test_augmented_cnn():
                 print(f"Fold: {test_num}, Blur: {blur_size}, Noise: {noise_level}, Acc: {accuracy}")
 
 if __name__ == "__main__":
-    test_augmented_resnet()
+    # test_augmented_resnet()
+    # test_augmented_xgboost()
     test_augmented_cnn()
